@@ -1,6 +1,6 @@
 """
 Dynamic US + European Stock Screener (Production Edition)
-Automated Institutional Pullback Screener & Live HTML Publisher with Client Polling
+Automated Institutional Pullback Screener & Live HTML Publisher (Chart + Stock Table)
 """
 
 from __future__ import annotations
@@ -311,7 +311,7 @@ def technical_row(ticker: str, frame: pd.DataFrame) -> Optional[dict[str, object
 
 # ---------------- Interactive Dashboard & Live HTML ---------------------- #
 
-def generate_live_updating_dashboard(top_candidates: pd.DataFrame, histories: dict[str, pd.DataFrame]) -> Optional[Path]:
+def generate_live_updating_dashboard(full_df: pd.DataFrame, top_candidates: pd.DataFrame, histories: dict[str, pd.DataFrame]) -> Optional[Path]:
     if not PLOTLY_AVAILABLE or top_candidates.empty:
         return None
 
@@ -374,28 +374,59 @@ def generate_live_updating_dashboard(top_candidates: pd.DataFrame, histories: di
         xaxis_rangeslider_visible=False,
         updatemenus=[dict(active=0, buttons=buttons, x=0.0, y=1.15, xanchor="left", yanchor="top", direction="right", bgcolor="#222222", font=dict(color="#FFFFFF"))],
         shapes=initial_shapes,
+        height=600,
     )
 
-    html_content = fig.to_html(include_plotlyjs="cdn", full_html=True)
+    plotly_html = fig.to_html(include_plotlyjs="cdn", full_html=False)
     
-    # Live auto-refresh injection snippet
-    live_polling_injection = """
-    <meta http-equiv="refresh" content="300">
-    <script>
-        // Background polling checker for live webpage synchronization
-        setInterval(function() {
-            fetch(window.location.href, {method: 'HEAD'})
-                .then(res => {
-                    // If server headers change, silently trigger reload to show fresh data
-                    console.log("Live background sync active.");
-                }).catch(err => console.log("Sync check skipped"));
-        }, 60000);
-    </script>
-    """
-    html_content = html_content.replace("<head>", f"<head>\n    {live_polling_injection}")
+    # Generate HTML table for full ranked stock list
+    table_html = full_df[["Rank", "Ticker", "Price", "52W High", "RSI (14)", "Backtest Win Prob", "Current Support", "Stop Loss", "Shares to Buy", "Allocation ($/€)"]].to_html(
+        classes="table table-dark table-striped table-hover", index=False, float_format=lambda x: f"{x:.2f}"
+    )
 
-    DASHBOARD_FILE.write_text(html_content, encoding="utf-8")
-    log(f"Live website dashboard saved to: {DASHBOARD_FILE}")
+    complete_html = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta http-equiv="refresh" content="300">
+        <title>Institutional Stock Screener Dashboard</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+        <style>
+            body {{ background-color: #121212; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }}
+            .container {{ max-width: 1400px; padding: 20px; }}
+            h1, h4 {{ color: #ffffff; }}
+            .card {{ background-color: #1e1e1e; border: 1px solid #333; border-radius: 8px; margin-bottom: 25px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }}
+            .table-responsive {{ max-height: 500px; overflow-y: auto; }}
+            th {{ background-color: #1f4e78 !important; color: #ffffff !important; position: sticky; top: 0; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1 class="text-center my-4">Institutional Pullback Stock Screener</h1>
+            
+            <div class="card p-3">
+                <h4 class="mb-3">Top Candidates Visualizer</h4>
+                {plotly_html}
+            </div>
+
+            <div class="card p-3">
+                <h4 class="mb-3">Complete Qualified Screener Results & Allocation Table</h4>
+                <div class="table-responsive">
+                    {table_html}
+                </div>
+            </div>
+            
+            <footer class="text-center text-muted my-4">
+                <p>Automated Institutional Screener &bull; Live Cloud Deployment via GitHub Actions</p>
+            </footer>
+        </div>
+    </body>
+    </html>
+    """
+
+    DASHBOARD_FILE.write_text(complete_html, encoding="utf-8")
+    log(f"Enhanced live dashboard saved to: {DASHBOARD_FILE}")
     return DASHBOARD_FILE
 
 
@@ -412,10 +443,11 @@ def main() -> int:
         return 1
 
     full = pd.DataFrame(technical).sort_values("Backtest Win Prob", ascending=False)
+    full.insert(0, "Rank", range(1, len(full) + 1))
     top = full.head(5).copy()
 
-    generate_live_updating_dashboard(top, histories)
-    log("Process completed successfully. index.html ready for live online display.")
+    generate_live_updating_dashboard(full, top, histories)
+    log("Process completed successfully. index.html updated.")
     return 0
 
 
